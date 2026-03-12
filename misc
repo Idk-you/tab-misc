@@ -1,0 +1,692 @@
+local MiscTab = Window:Tab("misc")
+
+-- ─── mine detonator setup (must be before the UI button below) ────────────
+local _MineS = {
+    mineFolders = {"OutpostClaymores", "OutpostLandmines", "HeliCrashClaymores",
+                   "BridgeClaymores", "HydroPlant", "PowerPlant", "Claymores", "Landmines"},
+    mineNames   = {"PMN2", "MON50", "ElectricityAnomaly"},
+}
+
+local function _detonateAllMines()
+    local searchRoots = {
+        workspace:FindFirstChild("AiZones"),
+        workspace:FindFirstChild("Zones"),
+        workspace:FindFirstChild("Map"),
+        workspace,
+    }
+    local detonated = 0
+    local seen = {}
+
+    local function _explodeMine(mine)
+        if seen[mine] then return end
+        seen[mine] = true
+        local hrp = mine:FindFirstChild("HumanoidRootPart")
+              or mine:FindFirstChild("PrimaryPart")
+              or mine:FindFirstChildWhichIsA("BasePart")
+        if not hrp then return end
+        local pos = hrp.Position
+        pcall(function()
+            local exp = Instance.new("Explosion")
+            exp.Position        = pos
+            exp.BlastRadius     = 8
+            exp.BlastPressure   = 0   -- 0 = visual only, no physics damage to us
+            exp.DestroyJointRadiusPercent = 0
+            exp.ExplosionType   = Enum.ExplosionType.NoCraters
+            exp.Parent          = workspace
+        end)
+        pcall(function() mine:Destroy() end)
+        detonated = detonated + 1
+    end
+
+    for _, root in ipairs(searchRoots) do
+        if root then
+            for _, folderName in ipairs(_MineS.mineFolders) do
+                local folder = root:FindFirstChild(folderName, true)
+                if folder then
+                    for _, mine in ipairs(folder:GetChildren()) do
+                        if table.find(_MineS.mineNames, mine.Name) then
+                            _explodeMine(mine)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if table.find(_MineS.mineNames, obj.Name) and obj:IsA("Model") then
+            _explodeMine(obj)
+        end
+    end
+    return detonated
+end
+-- ─────────────────────────────────────────────────────────────────────────────
+
+local MovSection = MiscTab:Section("movement", "Left")
+MovSection:Toggle({Title = "omnisprint", Flag = "OmniSprint", Default = false})
+local _togThirdPerson = MovSection:Toggle({Title = "third person", Flag = "ThirdPerson", Default = false, Callback = function(s)
+    BrzS.thirdPerson = s
+    task.defer(function()
+        if type(applyThirdPerson) == "function" then applyThirdPerson(s) end
+    end)
+end})
+_togThirdPerson:Keybind({Title = "3p key", Flag = "ThirdPersonKey", Key = Enum.KeyCode.P, StateType = "Toggle", Callback = function() _togThirdPerson:Set(not _togThirdPerson.Toggled) end})
+MovSection:Slider({Title = "3p distance", Flag = "ThirdPersonDist", Symbol = "m", Default = 20, Min = 5, Max = 50, Decimals = 1, Callback = function(v)
+    BrzS.thirdPersonDist = v
+    if BrzS.thirdPerson then
+        pcall(function() player.CameraMaxZoomDistance = v end)
+    end
+end})
+MovSection:Dropdown({Title = "3p mode", Flag = "ThirdPersonMode",
+    List = {"shift", "free"},
+    Default = "shift",
+    Callback = function(v)
+        BrzS.thirdPersonMode = v
+        if BrzS.thirdPerson then
+            if type(applyThirdPerson) == "function" then applyThirdPerson(true) end
+        end
+    end
+})
+MovSection:Toggle({Title = "silent steps", Flag = "SilentSteps", Default = false})
+MovSection:Toggle({Title = "bunny hop", Flag = "BunnyHop", Default = false})
+MovSection:Slider({Title = "bhop power", Flag = "BhopPower", Symbol = "", Default = 22, Min = 10, Max = 60, Decimals = 1})
+MovSection:Toggle({Title = "no fall damage", Flag = "NoFallDmg", Default = false})
+MovSection:Toggle({Title = "long jump", Flag = "LongJump", Default = false})
+MovSection:Slider({Title = "long jump power", Flag = "LongJumpPow", Symbol = "", Default = 60, Min = 10, Max = 200, Decimals = 1})
+
+local WorldMiscSection = MiscTab:Section("world", "Left")
+WorldMiscSection:Button({Title = "detonate all mines", Callback = function()
+    task.spawn(function()
+        local n = _detonateAllMines()
+        r0_0("exchange.hook", "detonated " .. tostring(n) .. " mine(s) 💥", 4)
+    end)
+end})
+
+WorldMiscSection:Toggle({Title = "anti-afk", Flag = "MiscAntiAFK", Default = false,
+    Callback = function(s)
+        if s then enableAntiAFK() else disableAntiAFK() end
+    end})
+local _togDroppedESP = WorldMiscSection:Toggle({Title = "dropped item esp", Flag = "DroppedESP", Default = false, Callback = function(s)
+    BrzS.droppedItemESP = s
+    task.spawn(function()
+        if type(refreshDroppedESP) == "function" then refreshDroppedESP() end
+    end)
+end})
+_togDroppedESP:Keybind({Title = "dropped esp key", Flag = "DroppedESPKey", Key = Enum.KeyCode.J, StateType = "Toggle", Callback = function() _togDroppedESP:Set(not _togDroppedESP.Toggled) end})
+WorldMiscSection:Toggle({Title = "broker bypass", Flag = "BrokerAutoUnhide", Default = false})
+
+-- corpse ESP
+WorldMiscSection:Toggle({Title = "corpse esp", Flag = "CorpseESP", Default = false, Callback = function(s)
+    BrzS.corpseESP = s
+    _refreshCorpseESP(s)
+end}):Colorpicker({Color = Color3.fromRGB(0, 255, 0), Flag = "CorpseColor", Callback = function(c)
+    BrzS.corpseColor = c
+    if BrzS.corpseESP then _refreshCorpseESP(false); _refreshCorpseESP(true) end
+end})
+WorldMiscSection:Toggle({Title = "inventory check corpses", Flag = "InvCheckCorpse", Default = false, Callback = function(s)
+    BrzS.inventoryCheckCorpse = s
+end})
+
+-- mod + cheat detectors (free - useful for everyone)
+WorldMiscSection:Toggle({Title = "mod detector", Flag = "ModDetector", Default = false, Callback = function(s)
+    BrzS.modDetector = s
+    BrzS._modWarnings = {}
+    BrzS._modChecked  = {}
+end})
+WorldMiscSection:Toggle({Title = "cheat detector", Flag = "CheatDetector", Default = false, Callback = function(s)
+    BrzS.cheatDetector = s
+    BrzS._cheaterList  = {}
+end})
+
+local VMChangerSection = MiscTab:Section("viewmodel", "Left")
+VMChangerSection:Toggle({Title = "viewmodel changer", Flag = "ViewmodelChanger", Default = false, Callback = function(s)
+    BrzS.viewmodelChanger = s
+    task.defer(function()
+        local vm = cam:FindFirstChild("ViewModel")
+        if vm then
+            if s then
+                if type(applyViewmodelChanger) == "function" then applyViewmodelChanger(vm) end
+            else
+                for _, part in ipairs(vm:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        pcall(function()
+                            if BrzS._vmOrigTransp[part] ~= nil then part.Transparency = BrzS._vmOrigTransp[part] end
+                        end)
+                    end
+                end
+                BrzS._vmOrigTransp = {}
+            end
+        end
+    end)
+end})
+VMChangerSection:Slider({Title = "vm transparency", Flag = "ViewmodelTransp", Symbol = "", Default = 0, Min = 0, Max = 10, Decimals = 1, Callback = function(v)
+    BrzS.viewmodelTransp = v / 10
+    if BrzS.viewmodelChanger then
+        task.defer(function()
+            local vm = cam:FindFirstChild("ViewModel")
+            if vm and type(applyViewmodelChanger) == "function" then applyViewmodelChanger(vm) end
+        end)
+    end
+end})
+
+
+local SFXSection = MiscTab:Section("screen fx", "Right")
+SFXSection:Toggle({Title = "no visor / flashbang", Flag = "NoVisor", Default = false})
+SFXSection:Button({Title = "no inv background", Callback = function()
+    pcall(function()
+        local gui = player:FindFirstChild("PlayerGui")
+        if not gui then return end
+        local backpackFrame = gui:FindFirstChild("MainGui", true)
+        backpackFrame = backpackFrame and backpackFrame:FindFirstChild("MainFrame", true)
+        backpackFrame = backpackFrame and backpackFrame:FindFirstChild("BackpackFrame", true)
+        if not backpackFrame then return end
+        for _, name in ipairs({"CharacterFrame","InventoryFrame","Loot"}) do
+            local frame = backpackFrame:FindFirstChild(name, true)
+            if frame and frame:IsA("Frame") then frame.BackgroundTransparency = 1 end
+        end
+        for _, obj in ipairs(backpackFrame:GetDescendants()) do
+            if obj:IsA("ImageLabel") and obj.Name == "Decor" then obj.ImageTransparency = 1 end
+        end
+    end)
+    Library:Notify("inventory background removed")
+end})
+SFXSection:Toggle({Title = "no inv blur", Flag = "NoInvBlur", Default = false, Callback = function(s)
+    BrzS.noInvBlur = s
+    if s then
+        pcall(function()
+            -- zero any existing blur effects in Lighting (except our own)
+            for _, d in ipairs(Lighting:GetDescendants()) do
+                if d:IsA("BlurEffect") and d ~= Library._uiBlur then
+                    d.Size = 0
+                end
+            end
+            -- zero any in PlayerGui
+            for _, d in ipairs(player.PlayerGui:GetDescendants()) do
+                if d:IsA("BlurEffect") then d.Size = 0 end
+            end
+        end)
+    else
+        -- restore stored inventory blur
+        pcall(function()
+            local blur = Lighting:FindFirstChild("InventoryBlur")
+            if blur and blur.Size == 0 then blur.Size = 24 end
+        end)
+    end
+end})
+SFXSection:Toggle({Title = "no repair blur", Flag = "NoRepairBlur", Default = false})
+
+local BossSection = MiscTab:Section("boss info", "Right")
+BossSection:Toggle({Title = "show boss panel", Flag = "ShowBoss", Default = false, Callback = function(s)
+    BrzS.showBoss = s
+    if s then
+        if not bossInfoGui or not bossInfoGui.Parent then
+            buildBossInfoGui()
+        end
+    else
+        if bossInfoGui then pcall(function() bossInfoGui:Destroy() end); bossInfoGui = nil end
+    end
+end})
+BossSection:Toggle({Title = "panel movable", Flag = "BossMovable", Default = false})
+
+local DetSection = MiscTab:Section("detectors", "Right")
+DetSection:Toggle({Title = "mod detector", Flag = "ModDetector", Default = false})
+DetSection:Toggle({Title = "cheat detector", Flag = "CheatDetector", Default = false})
+
+local VMSection = MiscTab:Section("viewmodel offsets", "Right")
+VMSection:Toggle({Title = "enable offsets", Flag = "VMOffsetsEnabled", Callback = function(s)
+    BrzS.vmOffsets = s
+    if not s then
+        local vm = getViewModel()
+        if vm and vm.PrimaryPart then
+        end
+    end
+end, Default = false})
+VMSection:Slider({Title = "pos  x  (left / right)", Flag = "VMOffX", Symbol = "", Default = 0, Min = -200, Max = 200, Decimals = 1, Callback = function(v)
+    BrzS.vmOffsetX = v / 100
+end})
+VMSection:Slider({Title = "pos  y  (down / up)", Flag = "VMOffY", Symbol = "", Default = 0, Min = -200, Max = 200, Decimals = 1, Callback = function(v)
+    BrzS.vmOffsetY = v / 100
+end})
+VMSection:Slider({Title = "pos  z  (forward / back)", Flag = "VMOffZ", Symbol = "", Default = 0, Min = -200, Max = 200, Decimals = 1, Callback = function(v)
+    BrzS.vmOffsetZ = v / 100
+end})
+VMSection:Slider({Title = "rot  x  (pitch)", Flag = "VMRotX", Symbol = "deg", Default = 0, Min = -4500, Max = 4500, Decimals = 1, Callback = function(v)
+    BrzS.vmRotX = v / 100
+end})
+VMSection:Slider({Title = "rot  y  (yaw)", Flag = "VMRotY", Symbol = "deg", Default = 0, Min = -4500, Max = 4500, Decimals = 1, Callback = function(v)
+    BrzS.vmRotY = v / 100
+end})
+VMSection:Slider({Title = "rot  z  (roll)", Flag = "VMRotZ", Symbol = "deg", Default = 0, Min = -4500, Max = 4500, Decimals = 1, Callback = function(v)
+    BrzS.vmRotZ = v / 100
+end})
+VMSection:Button({Title = "reset offsets", Callback = function()
+    Library.Flags["VMOffX"]  = 0; Library.Flags["VMOffY"]  = 0; Library.Flags["VMOffZ"]  = 0
+    Library.Flags["VMRotX"]  = 0; Library.Flags["VMRotY"]  = 0; Library.Flags["VMRotZ"]  = 0
+    BrzS.vmOffsetX = 0; BrzS.vmOffsetY = 0; BrzS.vmOffsetZ = 0
+    BrzS.vmRotX = 0; BrzS.vmRotY = 0; BrzS.vmRotZ = 0
+end})
+
+local PlrInfoSection = MiscTab:Section("my reports", "Left")
+
+do
+    local _rptLabel = PlrInfoSection:Label("reports: loading...")
+    local _flagsLabel = PlrInfoSection:Label("flags: loading...")
+    local _hsrLabel = PlrInfoSection:Label("hsr: loading...")
+    local _kdLabel = PlrInfoSection:Label("kd: loading...")
+    local _ageLabel = PlrInfoSection:Label("account age: loading...")
+
+    local function _updateMyStats()
+        pcall(function()
+            local statsFolder = ReplicatedStorage:FindFirstChild("Players")
+            local myStats = statsFolder and statsFolder:FindFirstChild(player.Name)
+            if not myStats then
+                _rptLabel:Set("reports: no data"); return
+            end
+
+            -- reports
+            local uac = myStats:FindFirstChild("Status") and myStats.Status:FindFirstChild("UAC")
+            local rptFolder = uac and uac:FindFirstChild("Reports")
+            local rptCount = 0
+            if rptFolder then
+                for _ in pairs(rptFolder:GetAttributes()) do rptCount += 1 end
+            end
+            _rptLabel:Set("reports: " .. rptCount)
+
+            -- flags / HSR from ReportList
+            local rl = ReplicatedStorage:FindFirstChild("ReportList")
+            local en = rl and (
+                (rl:FindFirstChild("MostWanted") and rl.MostWanted:FindFirstChild(player.Name)) or
+                (rl:FindFirstChild("Recent") and rl.Recent:FindFirstChild(player.Name))
+            )
+            local flags = en and (en:GetAttribute("TotalFlags") or 0) or 0
+            local hsr   = en and (en:GetAttribute("HSR") or 0) or 0
+            _flagsLabel:Set("flags: " .. flags)
+            _hsrLabel:Set("hsr: " .. hsr .. "%")
+
+            -- kills / deaths
+            local ws = myStats:FindFirstChild("Status") and myStats.Status:FindFirstChild("Journey")
+                       and myStats.Status.Journey:FindFirstChild("WipeStatistics")
+            if ws then
+                local k = ws:GetAttribute("Kills") or 0
+                local d = math.max(ws:GetAttribute("Deaths") or 1, 1)
+                _kdLabel:Set("k/d: " .. k .. " / " .. d .. " (" .. string.format("%.2f", k/d) .. ")")
+            end
+
+            -- account age
+            _ageLabel:Set("account age: " .. player.AccountAge .. "d")
+        end)
+    end
+
+    PlrInfoSection:Button({Title = "refresh stats", Callback = function()
+        task.spawn(_updateMyStats)
+    end})
+
+    task.spawn(function() task.wait(3); _updateMyStats() end)
+end
+
+
+-- ─── Auto Death Farmer ────────────────────────────────────────────────────────
+local _farmer = {
+    running   = false,
+    walkSecs  = 50,
+    _thread   = nil,
+    spawnX    = nil,  -- recorded screen X of west spawn button
+    spawnY    = nil,  -- recorded screen Y of west spawn button
+    recording = false,
+}
+
+local FARMER_LOG = "ExchangeHook/farmer_log.txt"
+local function _flog(msg)
+    local line = "[" .. os.date("%H:%M:%S") .. "] [EH Farmer] " .. tostring(msg)
+    print(line)
+    pcall(function()
+        if not writefile then return end
+        if isfolder and not isfolder("ExchangeHook") then pcall(function() makefolder("ExchangeHook") end) end
+        local existing = ""
+        pcall(function() if isfile and isfile(FARMER_LOG) and readfile then existing = readfile(FARMER_LOG) end end)
+        writefile(FARMER_LOG, existing .. line .. "\n")
+    end)
+end
+
+local function _farmerSendKey(keyCode)
+    _flog("SendKey: " .. tostring(keyCode))
+    local ok, err = pcall(function()
+        local VIM = game:GetService("VirtualInputManager")
+        VIM:SendKeyEvent(true,  keyCode, false, game)
+        task.wait(0.08)
+        VIM:SendKeyEvent(false, keyCode, false, game)
+        task.wait(0.05)
+    end)
+    if not ok then _flog("SendKey ERROR: " .. tostring(err)) end
+end
+
+local function _farmerMouseClick(x, y)
+    _flog("=== ClickAtPos " .. tostring(math.floor(x)) .. "," .. tostring(math.floor(y)) .. " ===")
+    local cam2 = workspace.CurrentCamera
+    if cam2 then
+        _flog("  Viewport: " .. tostring(cam2.ViewportSize.X) .. "x" .. tostring(cam2.ViewportSize.Y))
+    end
+
+    -- ── EXECUTOR NUCLEAR CLICK: call connected handlers directly ──────────────
+    -- getconnections() bypasses all Roblox signal filtering and fires the
+    -- actual Lua callback the game registered, regardless of Active/gpe/etc.
+    local function _nukeClick(btn)
+        local fired = false
+        -- Method A: getconnections (best — calls the game's own handler directly)
+        pcall(function()
+            if typeof(getconnections) ~= "function" then return end
+            local signals = {btn.MouseButton1Click, btn.Activated, btn.MouseButton1Down, btn.MouseButton1Up}
+            for _, sig in ipairs(signals) do
+                local conns = getconnections(sig)
+                if conns and #conns > 0 then
+                    _flog("    getconnections(" .. tostring(sig) .. ") -> " .. #conns .. " handlers")
+                    for _, c in ipairs(conns) do
+                        pcall(function() c:Fire() end)
+                        fired = true
+                    end
+                end
+            end
+        end)
+        -- Method B: firesignal (executor API, fires the signal at engine level)
+        pcall(function()
+            if typeof(firesignal) ~= "function" then return end
+            firesignal(btn.MouseButton1Click)
+            firesignal(btn.Activated)
+            fired = true
+            _flog("    firesignal fired")
+        end)
+        -- Method C: classic Fire (works on some executors)
+        pcall(function() btn.MouseButton1Click:Fire() end)
+        pcall(function() btn.Activated:Fire() end)
+        pcall(function() btn.MouseButton1Down:Fire(0,0) end)
+        task.wait(0.04)
+        pcall(function() btn.MouseButton1Up:Fire(0,0) end)
+        return fired
+    end
+
+    -- METHOD 1: GetGuiObjectsAtPosition — find the button, then nuke it
+    local pg = player:FindFirstChild("PlayerGui")
+    local hitBtn = nil
+    if pg then
+        local ok, objs = pcall(function() return pg:GetGuiObjectsAtPosition(x, y) end)
+        if ok and objs and #objs > 0 then
+            _flog("  GetGuiObjectsAtPosition -> " .. #objs .. " objs:")
+            for i, obj in ipairs(objs) do
+                local ok2, txt = pcall(function() return obj.Text end)
+                _flog("    [" .. i .. "] " .. obj.ClassName .. ":\"" .. tostring(obj.Name) .. "\" text=" .. tostring(ok2))
+                if not hitBtn and (obj:IsA("TextButton") or obj:IsA("ImageButton") or obj:IsA("GuiButton")) then
+                    hitBtn = obj
+                end
+            end
+            if hitBtn then
+                _flog("  -> Nuking " .. hitBtn.ClassName .. ":\"" .. tostring(hitBtn.Name) .. "\"")
+                _nukeClick(hitBtn)
+            else
+                _flog("  -> No button class at pos — nuking all objects")
+                for _, obj in ipairs(objs) do
+                    pcall(function() obj.Activated:Fire() end)
+                    pcall(function() obj.MouseButton1Click:Fire() end)
+                    if typeof(getconnections) == "function" then
+                        pcall(function()
+                            for _, c in ipairs(getconnections(obj.MouseButton1Click) or {}) do c:Fire() end
+                            for _, c in ipairs(getconnections(obj.Activated) or {}) do c:Fire() end
+                        end)
+                    end
+                end
+            end
+        else
+            _flog("  GetGuiObjectsAtPosition returned nothing — scanning PlayerGui")
+            for _, desc in ipairs(pg:GetDescendants()) do
+                if (desc:IsA("TextButton") or desc:IsA("ImageButton")) and desc.Visible then
+                    local ap = desc.AbsolutePosition
+                    local as = desc.AbsoluteSize
+                    local ok2, txt = pcall(function() return tostring(desc.Text) end)
+                    _flog(string.format("    %s:\"%s\" txt=\"%s\" pos=%d,%d sz=%dx%d",
+                        desc.ClassName, desc.Name, ok2 and txt or "?",
+                        math.floor(ap.X), math.floor(ap.Y), math.floor(as.X), math.floor(as.Y)))
+                end
+            end
+        end
+    else
+        _flog("  No PlayerGui!")
+    end
+
+    -- METHOD 2: VirtualInputManager (works even if GUI scan missed it)
+    task.wait(0.05)
+    local vimOk, vimErr = pcall(function()
+        local VIM = game:GetService("VirtualInputManager")
+        VIM:SendMouseMoveEvent(x, y, game)
+        task.wait(0.08)
+        VIM:SendMouseButtonEvent(x, y, 0, true,  game, 1)
+        task.wait(0.08)
+        VIM:SendMouseButtonEvent(x, y, 0, false, game, 1)
+    end)
+    _flog("  VIM click: " .. (vimOk and "ok" or ("FAILED: " .. tostring(vimErr))))
+end
+
+-- Shared nuke-click for find-and-click (defined after _farmerMouseClick is above)
+local function _nukeClickBtn(btn)
+    local name = btn.ClassName .. ":\"" .. tostring(btn.Name) .. "\""
+    _flog("  Nuking " .. name)
+    -- getconnections: call the game's actual Lua handler
+    pcall(function()
+        if typeof(getconnections) ~= "function" then return end
+        local sigs = {btn.MouseButton1Click, btn.Activated, btn.MouseButton1Down}
+        for _, sig in ipairs(sigs) do
+            for _, c in ipairs(getconnections(sig) or {}) do pcall(function() c:Fire() end) end
+        end
+    end)
+    pcall(function() if typeof(firesignal)=="function" then firesignal(btn.MouseButton1Click) end end)
+    pcall(function() btn.MouseButton1Click:Fire() end)
+    pcall(function() btn.Activated:Fire() end)
+    pcall(function() btn.MouseButton1Down:Fire(0,0) end)
+    task.wait(0.04)
+    pcall(function() btn.MouseButton1Up:Fire(0,0) end)
+    -- VIM at button center
+    pcall(function()
+        local cx = math.floor(btn.AbsolutePosition.X + btn.AbsoluteSize.X * 0.5)
+        local cy = math.floor(btn.AbsolutePosition.Y + btn.AbsoluteSize.Y * 0.5)
+        local VIM = game:GetService("VirtualInputManager")
+        VIM:SendMouseMoveEvent(cx, cy, game)
+        task.wait(0.06)
+        VIM:SendMouseButtonEvent(cx, cy, 0, true,  game, 1)
+        task.wait(0.06)
+        VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+    end)
+end
+
+local function _farmerFindAndClickButton(patterns)
+    local pg = player:FindFirstChild("PlayerGui")
+    if not pg then _flog("No PlayerGui found"); return false end
+    local found = {}
+    for _, gui in ipairs(pg:GetDescendants()) do
+        local isBtn = gui:IsA("TextButton") or gui:IsA("ImageButton") or gui:IsA("GuiButton")
+        if isBtn and gui.Visible then
+            local ok, t = pcall(function() return gui.Text end)
+            -- IMPORTANT: button text may be "" — fall back to Name for matching
+            local searchStr = (ok and t and t ~= "") and t or gui.Name
+            table.insert(found, searchStr)
+            local tl = searchStr:lower()
+            for _, pat in ipairs(patterns) do
+                if tl:find(pat, 1, true) then
+                    _flog("Found by pattern \"" .. pat .. "\": " .. gui.ClassName .. ":\"" .. gui.Name .. "\" txt=\"" .. tostring(t) .. "\"")
+                    _nukeClickBtn(gui)
+                    return true
+                end
+            end
+        end
+    end
+    _flog("No matching button. Candidates: " .. table.concat(found, " | "))
+    return false
+end
+
+local function _farmerClickWestSpawn()
+    if _farmer.spawnX and _farmer.spawnY then
+        _flog("Clicking recorded spawn pos: " .. _farmer.spawnX .. ", " .. _farmer.spawnY)
+        _farmerMouseClick(_farmer.spawnX, _farmer.spawnY)
+        task.wait(0.2)
+        _farmerMouseClick(_farmer.spawnX, _farmer.spawnY)
+        return true
+    end
+    _flog("No recorded pos - searching GUI for west spawn button")
+    local found = _farmerFindAndClickButton({"west", "estonian", "spawn on"})
+    if not found then
+        _flog("GUI search failed - pressing Enter as fallback")
+        _farmerSendKey(Enum.KeyCode.Return)
+    end
+    return true
+end
+
+local function _farmerGiveUp()
+    _flog("GiveUp: Escape -> R -> Enter")
+    _farmerSendKey(Enum.KeyCode.Escape)
+    task.wait(0.4)
+    _farmerSendKey(Enum.KeyCode.R)
+    task.wait(0.4)
+    _farmerSendKey(Enum.KeyCode.Return)
+    task.wait(0.3)
+    _flog("GiveUp: searching GUI for give up button")
+    _farmerFindAndClickButton({"give up", "flee", "extract", "leave"})
+    return true
+end
+
+local function _farmerWalkForward(secs)
+    _flog("Walking forward for " .. secs .. "s")
+    local t0 = os.clock()
+    while os.clock() - t0 < secs and _farmer.running do
+        local char = player.Character
+        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        if hrp and hum and hum.Health > 0 then
+            local fwd = hrp.CFrame.LookVector
+            hum:MoveTo(hrp.Position + fwd * 500)
+        end
+        task.wait(0.1)
+    end
+    _flog("Walk complete")
+end
+
+local function _farmerLoop()
+    _flog("Loop started. SpawnPos=" .. tostring(_farmer.spawnX) .. "," .. tostring(_farmer.spawnY))
+    local cycle = 0
+    while _farmer.running do
+        cycle += 1
+        _flog("=== Cycle " .. cycle .. " | spawnX=" .. tostring(_farmer.spawnX) .. " spawnY=" .. tostring(_farmer.spawnY) .. " ===")
+
+        _farmerWalkForward(_farmer.walkSecs)
+        if not _farmer.running then break end
+
+        _flog("Triggering give up...")
+        _farmerGiveUp()
+
+        _flog("Waiting 8s for respawn screen to appear...")
+        for i = 1, 8 do
+            task.wait(1)
+            _flog("  ... " .. i .. "/8s elapsed")
+            if not _farmer.running then break end
+        end
+        if not _farmer.running then break end
+
+        if _farmer.spawnX and _farmer.spawnY then
+            _flog("--- PRE-CLICK SCAN ---")
+            -- Dump every visible TextButton so we can see what's on screen
+            local pg2 = player:FindFirstChild("PlayerGui")
+            if pg2 then
+                local found2 = {}
+                for _, desc in ipairs(pg2:GetDescendants()) do
+                    if (desc:IsA("TextButton") or desc:IsA("ImageButton")) and desc.Visible then
+                        local ok2, txt2 = pcall(function() return tostring(desc.Text) end)
+                        local ap2 = desc.AbsolutePosition
+                        local as2 = desc.AbsoluteSize
+                        local vis2 = desc:IsDescendantOf(game)
+                        table.insert(found2, string.format("  %s:\"%s\" txt=\"%s\" pos=%d,%d sz=%dx%d",
+                            desc.ClassName, desc.Name, ok2 and txt2 or "?",
+                            math.floor(ap2.X), math.floor(ap2.Y),
+                            math.floor(as2.X), math.floor(as2.Y)))
+                    end
+                end
+                if #found2 > 0 then
+                    _flog("Visible buttons (" .. #found2 .. "):")
+                    for _, s in ipairs(found2) do _flog(s) end
+                else
+                    _flog("NO visible buttons found in PlayerGui — spawn screen may not be up yet")
+                end
+            end
+            _flog("Clicking recorded pos " .. math.floor(_farmer.spawnX) .. "," .. math.floor(_farmer.spawnY))
+            _farmerMouseClick(_farmer.spawnX, _farmer.spawnY)
+            task.wait(0.5)
+            _flog("Clicking again (double-click for reliability)")
+            _farmerMouseClick(_farmer.spawnX, _farmer.spawnY)
+        else
+            _flog("No spawn pos recorded — falling back to button text search")
+            _farmerFindAndClickButton({"west", "estonian", "spawn on"})
+        end
+
+        _flog("Waiting 5s for spawn to complete...")
+        task.wait(5)
+    end
+    _flog("Loop ended")
+end
+
+local FarmerSection = MiscTab:Section("auto death farmer", "Right")
+local _togFarmer = FarmerSection:Toggle({Title = "enabled", Flag = "FarmerEnabled", Default = false, Callback = function(s)
+    _farmer.running = s
+    if s then
+        _farmer._thread = task.spawn(_farmerLoop)
+    end
+end})
+FarmerSection:Slider({Title = "walk time", Flag = "FarmerWalkSecs", Symbol = "s", Default = 50, Min = 10, Max = 120, Decimals = 0, Callback = function(v)
+    _farmer.walkSecs = v
+end})
+
+-- Record spawn button location
+local _recLabel = FarmerSection:Label(_farmer.spawnX and ("spawn @ "..tostring(_farmer.spawnX)..","..tostring(_farmer.spawnY)) or "spawn pos: not set")
+FarmerSection:Button({Title = "record spawn click", Callback = function()
+    if _farmer.recording then return end
+    _farmer.recording = true
+    _recLabel:Set("click west spawn now...")
+    _flog("Recording mode ON — waiting for next LMB click")
+    -- Small delay so this button's own click doesn't get captured
+    task.wait(0.4)
+    local conn
+    conn = game:GetService("UserInputService").InputBegan:Connect(function(inp, gpe)
+        -- DO NOT skip on gpe=true: the spawn button IS a GUI element so gpe=true is normal
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            conn:Disconnect()
+            local mx = inp.Position.X
+            local my = inp.Position.Y
+            _farmer.spawnX = mx
+            _farmer.spawnY = my
+            _farmer.recording = false
+            local label = "spawn @ "..tostring(math.floor(mx))..", "..tostring(math.floor(my))
+            _recLabel:Set(label)
+            _flog("Recorded spawn pos: " .. math.floor(mx) .. ", " .. math.floor(my))
+            -- Verify what GUI object is at that position
+            local pg = player:FindFirstChild("PlayerGui")
+            if pg then
+                local ok, objs = pcall(function() return pg:GetGuiObjectsAtPosition(mx, my) end)
+                if ok and objs then
+                    local names = {}
+                    for _, o in ipairs(objs) do table.insert(names, o.ClassName..":"..o.Name) end
+                    _flog("Objects at recorded pos: " .. table.concat(names, ", "))
+                end
+            end
+        end
+    end)
+end})
+FarmerSection:Button({Title = "open farmer log", Callback = function()
+    _flog("--- log viewed ---")
+    pcall(function()
+        if isfile and readfile and isfile(FARMER_LOG) then
+            local lines = {}
+            for l in (readfile(FARMER_LOG) .. "\n"):gmatch("([^\n]*)\n") do
+                if l ~= "" then lines[#lines+1] = l end
+            end
+            print("=== farmer_log.txt (" .. #lines .. " lines) ===")
+            for _, l in ipairs(lines) do print(l) end
+            print("=== end ===")
+        else print("[EH] Log not found: " .. FARMER_LOG) end
+    end)
+end})
+FarmerSection:Label("log -> ExchangeHook/farmer_log.txt")
+FarmerSection:Label("1) record  2) click west spawn button")
+-- ──────────────────────────────────────────────────────────────────────────────
