@@ -1,3 +1,11 @@
+-- auto-generated: run after main.lua
+local Window   = getgenv().EH_Window
+local Library  = getgenv().EH_Library
+local Utility  = getgenv().EH_Utility
+local EH_Notify = getgenv().EH_Notify
+
+MiscTab = nil
+
 local MiscTab = Window:Tab("misc")
 
 -- ─── mine detonator setup (must be before the UI button below) ────────────
@@ -690,3 +698,6 @@ end})
 FarmerSection:Label("log -> ExchangeHook/farmer_log.txt")
 FarmerSection:Label("1) record  2) click west spawn button")
 -- ──────────────────────────────────────────────────────────────────────────────
+
+
+getgenv().MiscTab   = MiscTab
